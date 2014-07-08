@@ -77,7 +77,10 @@ private final class CachedCompiler0(args: Array[String], output: Output, initial
 			settings.outputDirs.setSingleOutput(single.outputDirectory.getAbsolutePath)
 	}
 
-	val command = Command(args.toList, settings)
+  private val argList = args.toList
+  private val simpleAnalysis = argList.head == "IntellijIdea.simpleAnalysis"
+  val command = Command(if (simpleAnalysis) argList.tail else argList, settings)
+
 	private[this] val dreporter = DelegatingReporter(settings, initialLog.reporter)
 	try {
 		if(!noErrors(dreporter)) {
@@ -222,8 +225,10 @@ private final class CachedCompiler0(args: Array[String], output: Output, initial
 		override lazy val phaseDescriptors =
 		{
 			phasesSet += sbtAnalyzer
-			phasesSet += sbtDependency
-			phasesSet += apiExtractor
+      if (!simpleAnalysis) {
+        phasesSet += sbtDependency
+			  phasesSet += apiExtractor
+      }
 			superComputePhaseDescriptors
 		}
 		// Required because computePhaseDescriptors is private in 2.8 (changed to protected sometime later).
