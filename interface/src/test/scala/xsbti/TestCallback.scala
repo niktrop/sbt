@@ -6,15 +6,20 @@ import xsbti.api.SourceAPI
 
 class TestCallback(override val nameHashing: Boolean = false) extends AnalysisCallback
 {
+	val beganSources = new ArrayBuffer[File]
+	val endedSources = new ArrayBuffer[File]
 	val sourceDependencies = new ArrayBuffer[(File, File, Boolean)]
 	val binaryDependencies = new ArrayBuffer[(File, String, File, Boolean)]
 	val products = new ArrayBuffer[(File, File, String)]
 	val usedNames = scala.collection.mutable.Map.empty[File, Set[String]].withDefaultValue(Set.empty)
 	val apis: scala.collection.mutable.Map[File, SourceAPI] = scala.collection.mutable.Map.empty
 
+	def beginSource(source: File) { beganSources += source }
+
 	def sourceDependency(dependsOn: File, source: File, inherited: Boolean) { sourceDependencies += ((dependsOn, source, inherited)) }
 	def binaryDependency(binary: File, name: String, source: File, inherited: Boolean) { binaryDependencies += ((binary, name, source, inherited)) }
 	def generatedClass(source: File, module: File, name: String) { products += ((source, module, name)) }
+	def endSource(source: File) { endedSources += source }
 
 	def usedName(source: File, name: String) { usedNames(source) += name }
 	def api(source: File, sourceAPI: SourceAPI): Unit = {

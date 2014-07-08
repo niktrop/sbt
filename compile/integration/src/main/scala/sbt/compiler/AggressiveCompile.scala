@@ -17,12 +17,14 @@ import inc._
 
 	import xsbti.{ Reporter, AnalysisCallback }
 	import xsbti.api.Source
-	import xsbti.compile.{CompileOrder, DependencyChanges, GlobalsCache, Output, SingleOutput, MultipleOutput, CompileProgress}
+	import xsbti.compile.{CompileOrder, DependencyChanges, GlobalsCache, Output, SingleOutput, MultipleOutput, CompileProgress, ExtendedCompileProgress}
 	import CompileOrder.{JavaThenScala, Mixed, ScalaThenJava}
 
 final class CompileConfiguration(val sources: Seq[File], val classpath: Seq[File],
 	val previousAnalysis: Analysis, val previousSetup: Option[CompileSetup], val currentSetup: CompileSetup, val progress: Option[CompileProgress], val getAnalysis: File => Option[Analysis], val definesClass: DefinesClass,
-	val reporter: Reporter, val compiler: AnalyzingCompiler, val javac: xsbti.compile.JavaCompiler, val cache: GlobalsCache, val incOptions: IncOptions)
+	val reporter: Reporter, val compiler: AnalyzingCompiler, val javac: xsbti.compile.JavaCompiler, val cache: GlobalsCache, val incOptions: IncOptions) {
+  def compilerOpt: Option[AnalyzingCompiler] = Option(compiler)
+}
 
 class AggressiveCompile(cacheFile: File)
 {
@@ -80,11 +82,15 @@ class AggressiveCompile(cacheFile: File)
 		import currentSetup._
 		val absClasspath = classpath.map(_.getAbsoluteFile)
 		val apiOption = (api: Either[Boolean, Source]) => api.right.toOption
-		val cArgs = new CompilerArguments(compiler.scalaInstance, compiler.cp)
-		val searchClasspath = explicitBootClasspath(options.options) ++ withBootclasspath(cArgs, absClasspath)
+		val cArgsOpt: Option[CompilerArguments] = compilerOpt.map(compiler => new CompilerArguments(compiler.scalaInstance, compiler.cp))
+		val searchClasspath = explicitBootClasspath(options.options) ++ cArgsOpt.map(it => withBootclasspath(it, absClasspath)).getOrElse(absClasspath)
 		val entry = Locate.entry(searchClasspath, definesClass)
 
-		val compile0 = (include: Set[File], changes: DependencyChanges, callback: AnalysisCallback) => {
+		val compile0 = (include: Set[File], changes: DependencyChanges, externalCallback: AnalysisCallback) => {
+      val callback = progress match {
+        case Some(ext: ExtendedCompileProgress) => new AnalysisCallbackAdapter(ext, externalCallback)
+        case _ => externalCallback
+      }
 			val outputDirs = outputDirectories(output)
 			outputDirs foreach (IO.createDirectory)
 			val incSrc = sources.filter(include)
@@ -93,12 +99,14 @@ class AggressiveCompile(cacheFile: File)
 			def compileScala() =
 				if(!scalaSrcs.isEmpty)
 				{
-					val sources = if(order == Mixed) incSrc else scalaSrcs
-					val arguments = cArgs(Nil, absClasspath, None, options.options)
-					timed("Scala compilation", log) {
-						compiler.compile(sources, changes, arguments, output, callback, reporter, cache, log, progress)
-					}
-				}
+          for (comp <- compilerOpt; cargs <- cArgsOpt) {
+            val sources = if(order == Mixed) incSrc else scalaSrcs
+            val arguments = cargs(Nil, absClasspath, None, options.options)
+            timed("Scala compilation", log) {
+              compiler.compile(sources, changes, arguments, output, callback, reporter, cache, log, progress)
+            }
+          }
+        }
 			def compileJava() =
 				if(!javaSrcs.isEmpty)
 				{
@@ -143,6 +151,11 @@ class AggressiveCompile(cacheFile: File)
 			if(order == JavaThenScala) { compileJava(); compileScala() } else { compileScala(); compileJava() }
 		}
 
+    val deletionListener = (file: File) => config.progress.foreach {
+      case ext: ExtendedCompileProgress => ext.deleted(file)
+      case _ =>
+    }
+
 		val sourcesSet = sources.toSet
 		val analysis = previousSetup match {
 			case Some(previous) if previous.nameHashing != currentSetup.nameHashing =>
@@ -152,9 +165,9 @@ class AggressiveCompile(cacheFile: File)
 				// Otherwise we'll be getting UnsupportedOperationExceptions
 				Analysis.empty(currentSetup.nameHashing)
 			case Some(previous) if equiv.equiv(previous, currentSetup) => previousAnalysis
-			case _ => Incremental.prune(sourcesSet, previousAnalysis)
+			case _ => Incremental.prune(sourcesSet, previousAnalysis, Some(deletionListener))
 		}
-		IncrementalCompile(sourcesSet, entry, compile0, analysis, getAnalysis, output, log, incOptions)
+		IncrementalCompile(sourcesSet, entry, compile0, analysis, getAnalysis, output, log, incOptions, Some(deletionListener))
 	}
 	private[this] def outputDirectories(output: Output): Seq[File] = output match {
 		case single: SingleOutput => List(single.outputDirectory)

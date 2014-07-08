@@ -30,6 +30,7 @@ final class Analyzer(val global: CallbackGlobal) extends LocateClassFile
 			for(unit <- currentRun.units if !unit.isJava)
 			{
 				val sourceFile = unit.source.file.file
+        callback.beginSource(sourceFile)
 				// build list of generated classes
 				for(iclass <- unit.icode)
 				{
@@ -48,6 +49,7 @@ final class Analyzer(val global: CallbackGlobal) extends LocateClassFile
 					else
 						addGenerated(false)
 				}
+				callback.endSource(sourceFile)
 			}
 		}
 	}

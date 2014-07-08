@@ -19,7 +19,8 @@ object Incremental
 		forEntry: File => Option[Analysis],
 		doCompile: (Set[File], DependencyChanges) => Analysis,
 		log: Logger,
-		options: IncOptions)(implicit equivS: Equiv[Stamp]): (Boolean, Analysis) =
+		options: IncOptions,
+        deletionListener: Option[File => Unit] = None)(implicit equivS: Equiv[Stamp]): (Boolean, Analysis) =
 	{
 		val incremental: IncrementalCommon =
 			if (!options.nameHashing)
@@ -35,7 +36,7 @@ object Incremental
 		val initialInv = incremental.invalidateInitial(previous.relations, initialChanges)
 		log.debug("All initially invalidated sources: " + initialInv + "\n")
 		val analysis = manageClassfiles(options) { classfileManager =>
-			incremental.cycle(initialInv, sources, binaryChanges, previous, doCompile, classfileManager, 1)
+			incremental.cycle(initialInv, sources, binaryChanges, previous, doCompile, classfileManager, 1, deletionListener)
 		}
 		(!initialInv.isEmpty, analysis)
 	}
@@ -50,14 +51,17 @@ object Incremental
 	private[inc] val apiDebugProp = "xsbt.api.debug"
 	private[inc] def apiDebug(options: IncOptions): Boolean =  options.apiDebug || java.lang.Boolean.getBoolean(apiDebugProp)
 
-	private[sbt] def prune(invalidatedSrcs: Set[File], previous: Analysis): Analysis =
-		prune(invalidatedSrcs, previous, ClassfileManager.deleteImmediately())
+	private[sbt] def prune(invalidatedSrcs: Set[File], previous: Analysis, deletionListener: Option[File => Unit]): Analysis =
+      prune(invalidatedSrcs, previous, ClassfileManager.deleteImmediately(), deletionListener)
 
-	private[sbt] def prune(invalidatedSrcs: Set[File], previous: Analysis, classfileManager: ClassfileManager): Analysis =
-	{
-		classfileManager.delete( invalidatedSrcs.flatMap(previous.relations.products) )
-		previous -- invalidatedSrcs
-	}
+	private[sbt] def prune(invalidatedSrcs: Set[File], previous: Analysis, classfileManager: ClassfileManager, deletionListener: Option[File => Unit]): Analysis =
+  {
+    val filesToDelete = invalidatedSrcs.flatMap(previous.relations.products)
+    classfileManager.delete( invalidatedSrcs.flatMap(previous.relations.products) )
+    deletionListener.foreach(listener => filesToDelete.foreach(listener(_)))
+
+    previous -- invalidatedSrcs
+  }
 
 	private[this] def manageClassfiles[T](options: IncOptions)(run: ClassfileManager => T): T =
 	{
@@ -85,7 +89,7 @@ private abstract class IncrementalCommon(log: Logger, options: IncOptions) {
 	// TODO: the Analysis for the last successful compilation should get returned + Boolean indicating success
 	// TODO: full external name changes, scopeInvalidations
 	@tailrec final def cycle(invalidatedRaw: Set[File], allSources: Set[File], binaryChanges: DependencyChanges, previous: Analysis,
-		doCompile: (Set[File], DependencyChanges) => Analysis, classfileManager: ClassfileManager, cycleNum: Int): Analysis =
+		doCompile: (Set[File], DependencyChanges) => Analysis, classfileManager: ClassfileManager, cycleNum: Int, deletionListener: Option[File => Unit]): Analysis =
 		if(invalidatedRaw.isEmpty)
 			previous
 		else
@@ -93,7 +97,7 @@ private abstract class IncrementalCommon(log: Logger, options: IncOptions) {
 			def debug(s: => String) = if (incDebug(options)) log.debug(s) else ()
 			val withPackageObjects = invalidatedRaw ++ invalidatedPackageObjects(invalidatedRaw, previous.relations)
 			val invalidated = expand(withPackageObjects, allSources)
-			val pruned = Incremental.prune(invalidated, previous, classfileManager)
+			val pruned = Incremental.prune(invalidated, previous, classfileManager, deletionListener)
 			debug("********* Pruned: \n" + pruned.relations + "\n*********")
 
 			val fresh = doCompile(invalidated, binaryChanges)
@@ -106,7 +110,7 @@ private abstract class IncrementalCommon(log: Logger, options: IncOptions) {
 			debug("\nChanges:\n" + incChanges)
 			val transitiveStep = options.transitiveStep
 			val incInv = invalidateIncremental(merged.relations, merged.apis, incChanges, invalidated, cycleNum >= transitiveStep)
-			cycle(incInv, allSources, emptyChanges, merged, doCompile, classfileManager, cycleNum+1)
+			cycle(incInv, allSources, emptyChanges, merged, doCompile, classfileManager, cycleNum+1, deletionListener)
 		}
 	private[this] def emptyChanges: DependencyChanges = new DependencyChanges {
 		val modifiedBinaries = new Array[File](0)

@@ -33,6 +33,7 @@ private[sbt] object Analyze
 			sourceFile <- classFile.sourceFile orElse guessSourceName(newClass.getName);
 			source <- guessSourcePath(sourceMap, classFile, log))
 		{
+			analysis.beginSource(source)
 			analysis.generatedClass(source, newClass, classFile.className)
 			productToSource(newClass) = source
 			sourceToClassFiles.getOrElseUpdate(source, new ArrayBuffer[ClassFile]) += classFile
@@ -68,10 +69,13 @@ private[sbt] object Analyze
 			val notInherited = classFiles.flatMap(_.types).toSet -- publicInherited
 			processDependencies(notInherited, false)
 			processDependencies(publicInherited, true)
+			analysis.endSource(source)
 		}
 
 		for( source <- sources filterNot sourceToClassFiles.keySet ) {
+			analysis.beginSource(source)
 			analysis.api(source, new xsbti.api.SourceAPI(Array(), Array()))
+			analysis.endSource(source)
 		}
 	}
 	private[this] def urlAsFile(url: URL, log: Logger): Option[File] =
