@@ -4,21 +4,19 @@
 package sbt
 package compiler
 
-import inc._
+import java.io.File
+
+import sbt.CompileSetup._
+import sbt.classfile.Analyze
+import sbt.classpath.ClasspathUtilities
+import sbt.inc.Locate.DefinesClass
+import sbt.inc.{IncOptions, _}
+import xsbti.api.Source
+import xsbti.compile.CompileOrder.{JavaThenScala, Mixed}
+import xsbti.compile.{CompileOrder, CompileProgress, DependencyChanges, ExtendedCompileProgress, GlobalsCache, MultipleOutput, Output, SingleOutput}
+import xsbti.{AnalysisCallback, Reporter}
 
 import scala.annotation.tailrec
-import java.io.File
-import classpath.ClasspathUtilities
-import classfile.Analyze
-import inc.Locate.DefinesClass
-import inc.IncOptions
-import CompileSetup._
-import sbinary.DefaultProtocol.{ immutableMapFormat, immutableSetFormat, StringFormat }
-
-import xsbti.{ Reporter, AnalysisCallback }
-import xsbti.api.Source
-import xsbti.compile.{ CompileOrder, DependencyChanges, GlobalsCache, Output, SingleOutput, MultipleOutput, CompileProgress }
-import CompileOrder.{ JavaThenScala, Mixed, ScalaThenJava }
 
 @deprecated("Use MixedAnalyzingCompiler or IC instead.", "0.13.8")
 class AggressiveCompile(cacheFile: File) {
@@ -77,8 +75,9 @@ class AggressiveCompile(cacheFile: File) {
       import currentSetup._
       val absClasspath = classpath.map(_.getAbsoluteFile)
       val apiOption = (api: Either[Boolean, Source]) => api.right.toOption
-      val cArgs = new CompilerArguments(compiler.scalaInstance, compiler.cp)
-      val searchClasspath = explicitBootClasspath(options.options) ++ withBootclasspath(cArgs, absClasspath)
+      val compilerOpt = Option(compiler)
+      val cArgsOpt: Option[CompilerArguments] = compilerOpt.map(compiler => new CompilerArguments(compiler.scalaInstance, compiler.cp))
+      val searchClasspath = explicitBootClasspath(options.options) ++ cArgsOpt.map(it => withBootclasspath(it, absClasspath)).getOrElse(absClasspath)
       val entry = Locate.entry(searchClasspath, definesClass)
 
       val compile0 = (include: Set[File], changes: DependencyChanges, callback: AnalysisCallback) => {
@@ -88,16 +87,17 @@ class AggressiveCompile(cacheFile: File) {
         val (javaSrcs, scalaSrcs) = incSrc partition javaOnly
         logInputs(log, javaSrcs.size, scalaSrcs.size, outputDirs)
         def compileScala() =
-          if (scalaSrcs.nonEmpty) {
-            val sources = if (order == Mixed) incSrc else scalaSrcs
-            val arguments = cArgs(Nil, absClasspath, None, options.options)
-            timed("Scala compilation", log) {
-              compiler.compile(sources, changes, arguments, output, callback, reporter, cache, log, progress)
+          if (!scalaSrcs.isEmpty) {
+            for (comp <- compilerOpt; cargs <- cArgsOpt) {
+              val sources = if (order == Mixed) incSrc else scalaSrcs
+              val arguments = cargs(Nil, absClasspath, None, options.options)
+              timed("Scala compilation", log) {
+                compiler.compile(sources, changes, arguments, output, callback, reporter, cache, log, progress)
+              }
             }
           }
         def compileJava() =
           if (javaSrcs.nonEmpty) {
-            import Path._
             @tailrec def ancestor(f1: File, f2: File): Boolean =
               if (f2 eq null) false else if (f1 == f2) true else ancestor(f1, f2.getParentFile)
 
@@ -142,6 +142,11 @@ class AggressiveCompile(cacheFile: File) {
         if (order == JavaThenScala) { compileJava(); compileScala() } else { compileScala(); compileJava() }
       }
 
+      val deletionListener = (file: File) => config.progress.foreach {
+        case ext: ExtendedCompileProgress => ext.deleted(file)
+        case _                            =>
+      }
+
       val sourcesSet = sources.toSet
       val analysis = previousSetup match {
         case Some(previous) if previous.nameHashing != currentSetup.nameHashing =>
@@ -154,9 +159,9 @@ class AggressiveCompile(cacheFile: File) {
         case Some(previous) if equiv.equiv(previous, currentSetup) => previousAnalysis
         case _ =>
           log.warn("Pruning sources from previous analysis, due to incompatible CompileSetup.")
-          Incremental.prune(sourcesSet, previousAnalysis)
+          Incremental.prune(sourcesSet, previousAnalysis, Some(deletionListener))
       }
-      IncrementalCompile(sourcesSet, entry, compile0, analysis, getAnalysis, output, log, incOptions)
+      IncrementalCompile(sourcesSet, entry, compile0, analysis, getAnalysis, output, log, incOptions, Some(deletionListener))
     }
   private[this] def outputDirectories(output: Output): Seq[File] = output match {
     case single: SingleOutput => List(single.outputDirectory)
@@ -223,8 +228,9 @@ object AggressiveCompile {
 
 @deprecated("Deprecated in favor of new sbt.compiler.javac package.", "0.13.8")
 private[sbt] class JavacLogger(log: Logger) extends ProcessLogger {
+  import Level.{Error, Info, Value => LogLevel, Warn}
+
   import scala.collection.mutable.ListBuffer
-  import Level.{ Info, Warn, Error, Value => LogLevel }
 
   private val msgs: ListBuffer[(LogLevel, String)] = new ListBuffer()
 

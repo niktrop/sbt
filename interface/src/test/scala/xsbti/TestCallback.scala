@@ -1,12 +1,19 @@
 package xsbti
 
 import java.io.File
-import scala.collection.mutable.ArrayBuffer
-import xsbti.api.SourceAPI
+
 import xsbti.DependencyContext._
+
+import scala.collection.mutable.ArrayBuffer
 
 class TestCallback(override val nameHashing: Boolean = false) extends AnalysisCallback
 {
+	val beganSources = new ArrayBuffer[File]
+	val endedSources = new ArrayBuffer[File]
+
+	def beginSource(source: File) { beganSources += source }
+	def endSource(source: File) { endedSources += source }
+
 	val sourceDependencies = new ArrayBuffer[(File, File, DependencyContext)]
 	val binaryDependencies = new ArrayBuffer[(File, String, File, DependencyContext)]
 	val products = new ArrayBuffer[(File, File, String)]

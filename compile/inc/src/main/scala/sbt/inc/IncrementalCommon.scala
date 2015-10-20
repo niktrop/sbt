@@ -1,10 +1,12 @@
 package sbt
 package inc
 
-import scala.annotation.tailrec
-import xsbti.compile.DependencyChanges
-import xsbti.api.{ Compilation, Source }
 import java.io.File
+
+import xsbti.api.{Compilation, Source}
+import xsbti.compile.DependencyChanges
+
+import scala.annotation.tailrec
 
 private[inc] abstract class IncrementalCommon(log: Logger, options: IncOptions) {
 
@@ -18,14 +20,14 @@ private[inc] abstract class IncrementalCommon(log: Logger, options: IncOptions) 
   // TODO: the Analysis for the last successful compilation should get returned + Boolean indicating success
   // TODO: full external name changes, scopeInvalidations
   @tailrec final def cycle(invalidatedRaw: Set[File], allSources: Set[File], binaryChanges: DependencyChanges, previous: Analysis,
-    doCompile: (Set[File], DependencyChanges) => Analysis, classfileManager: ClassfileManager, cycleNum: Int): Analysis =
+    doCompile: (Set[File], DependencyChanges) => Analysis, classfileManager: ClassfileManager, cycleNum: Int, deletionListener: Option[File => Unit]): Analysis =
     if (invalidatedRaw.isEmpty)
       previous
     else {
       def debug(s: => String) = if (incDebug(options)) log.debug(s) else ()
       val withPackageObjects = invalidatedRaw ++ invalidatedPackageObjects(invalidatedRaw, previous.relations)
       val invalidated = expand(withPackageObjects, allSources)
-      val pruned = Incremental.prune(invalidated, previous, classfileManager)
+      val pruned = Incremental.prune(invalidated, previous, classfileManager, deletionListener)
       debug("********* Pruned: \n" + pruned.relations + "\n*********")
 
       val fresh = doCompile(invalidated, binaryChanges)
@@ -38,7 +40,7 @@ private[inc] abstract class IncrementalCommon(log: Logger, options: IncOptions) 
       debug("\nChanges:\n" + incChanges)
       val transitiveStep = options.transitiveStep
       val incInv = invalidateIncremental(merged.relations, merged.apis, incChanges, invalidated, cycleNum >= transitiveStep)
-      cycle(incInv, allSources, emptyChanges, merged, doCompile, classfileManager, cycleNum + 1)
+      cycle(incInv, allSources, emptyChanges, merged, doCompile, classfileManager, cycleNum + 1, deletionListener)
     }
   private[this] def emptyChanges: DependencyChanges = new DependencyChanges {
     val modifiedBinaries = new Array[File](0)

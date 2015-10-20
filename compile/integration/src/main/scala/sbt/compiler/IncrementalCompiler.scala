@@ -1,18 +1,12 @@
 package sbt.compiler
 
 import java.io.File
-import sbt.compiler.javac.AnalyzingJavaCompiler
-import sbt.inc.Locate._
+
 import sbt._
 import sbt.inc._
-import xsbti.Logger
-import xsbti.api.Source
-import xsbti.compile.ClasspathOptions
 import xsbti.compile.CompileOrder._
-import xsbti.compile.DefinesClass
-import xsbti.compile.ScalaInstance
-import xsbti.{ Reporter, Logger, Maybe }
-import xsbti.compile._
+import xsbti.compile.{ClasspathOptions, ScalaInstance, _}
+import xsbti.{Logger, Maybe, Reporter}
 
 // TODO -
 //  1. Move analyzingCompile from MixedAnalyzingCompiler into here
@@ -28,7 +22,7 @@ object IC extends IncrementalCompiler[Analysis, AnalyzingCompiler] {
   override def compile(in: Inputs[Analysis, AnalyzingCompiler], log: Logger): Analysis =
     {
       val setup = in.setup; import setup._
-      val options = in.options; import options.{ options => scalacOptions, _ }
+      val options = in.options; import options.{options => scalacOptions, _}
       val compilers = in.compilers; import compilers._
       val aMap = (f: File) => m2o(analysisMap(f))
       val defClass = (f: File) => { val dc = definesClass(f); (name: String) => dc.apply(name) }
@@ -131,7 +125,7 @@ object IC extends IncrementalCompiler[Analysis, AnalyzingCompiler] {
       progress, options, javacOptions, previousAnalysis, previousSetup, analysisMap, definesClass, reporter,
       compileOrder, skip, incrementalCompilerOptions
     )
-    import config.{ currentSetup => setup }
+    import config.{currentSetup => setup}
 
     if (skip) Result(previousAnalysis, setup, false)
     else {
@@ -154,9 +148,9 @@ object IC extends IncrementalCompiler[Analysis, AnalyzingCompiler] {
         // Otherwise we'll be getting UnsupportedOperationExceptions
         Analysis.empty(currentSetup.nameHashing)
       case Some(previous) if equiv.equiv(previous, currentSetup) => previousAnalysis
-      case _ => Incremental.prune(sourcesSet, previousAnalysis)
+      case _ => Incremental.prune(sourcesSet, previousAnalysis, None)
     }
     // Run the incremental compiler using the mixed compiler we've defined.
-    IncrementalCompile(sourcesSet, entry, mixedCompiler.compile, analysis, getAnalysis, output, log, incOptions).swap
+    IncrementalCompile(sourcesSet, entry, mixedCompiler.compile, analysis, getAnalysis, output, log, incOptions, None).swap
   }
 }

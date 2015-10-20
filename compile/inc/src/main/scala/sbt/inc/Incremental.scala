@@ -4,11 +4,9 @@
 package sbt
 package inc
 
-import xsbt.api.{ NameChanges, SameAPI, TopLevel }
-import annotation.tailrec
-import xsbti.api.{ Compilation, Source }
-import xsbti.compile.DependencyChanges
 import java.io.File
+
+import xsbti.compile.DependencyChanges
 
 /**
  * Helper class to run incremental compilation algorithm.
@@ -31,6 +29,7 @@ object Incremental {
    * @param log  The log where we write debugging information
    * @param options  Incremental compilation options
    * @param equivS  The means of testing whether two "Stamps" are the same.
+   * @param deletionListener To pass information to Intellij IDEA incremental compiler
    * @return
    *         A flag of whether or not compilation completed succesfully, and the resulting dependency analysis object.
    */
@@ -41,7 +40,8 @@ object Incremental {
     forEntry: File => Option[Analysis],
     doCompile: (Set[File], DependencyChanges) => Analysis,
     log: Logger,
-    options: IncOptions)(implicit equivS: Equiv[Stamp]): (Boolean, Analysis) =
+    options: IncOptions,
+    deletionListener: Option[File => Unit] = None)(implicit equivS: Equiv[Stamp]): (Boolean, Analysis) =
     {
       val incremental: IncrementalCommon =
         if (options.nameHashing)
@@ -59,7 +59,7 @@ object Incremental {
       val initialInv = incremental.invalidateInitial(previous.relations, initialChanges)
       log.debug("All initially invalidated sources: " + initialInv + "\n")
       val analysis = manageClassfiles(options) { classfileManager =>
-        incremental.cycle(initialInv, sources, binaryChanges, previous, doCompile, classfileManager, 1)
+        incremental.cycle(initialInv, sources, binaryChanges, previous, doCompile, classfileManager, 1, deletionListener)
       }
       (initialInv.nonEmpty, analysis)
     }
@@ -74,12 +74,15 @@ object Incremental {
   private[inc] val apiDebugProp = "xsbt.api.debug"
   private[inc] def apiDebug(options: IncOptions): Boolean = options.apiDebug || java.lang.Boolean.getBoolean(apiDebugProp)
 
-  private[sbt] def prune(invalidatedSrcs: Set[File], previous: Analysis): Analysis =
-    prune(invalidatedSrcs, previous, ClassfileManager.deleteImmediately())
+  private[sbt] def prune(invalidatedSrcs: Set[File], previous: Analysis, deletionListener: Option[File => Unit]): Analysis =
+    prune(invalidatedSrcs, previous, ClassfileManager.deleteImmediately(), deletionListener)
 
-  private[sbt] def prune(invalidatedSrcs: Set[File], previous: Analysis, classfileManager: ClassfileManager): Analysis =
+  private[sbt] def prune(invalidatedSrcs: Set[File], previous: Analysis, classfileManager: ClassfileManager,
+    deletionListener: Option[File => Unit]): Analysis =
     {
+      val filesToDelete = invalidatedSrcs.flatMap(previous.relations.products)
       classfileManager.delete(invalidatedSrcs.flatMap(previous.relations.products))
+      deletionListener.foreach(listener => filesToDelete.foreach(f => listener(f)))
       previous -- invalidatedSrcs
     }
 

@@ -4,16 +4,17 @@
 package sbt
 package classfile
 
-import scala.collection.mutable
-import mutable.{ ArrayBuffer, Buffer }
-import scala.annotation.tailrec
 import java.io.File
-import java.lang.annotation.Annotation
 import java.lang.reflect.Method
-import java.lang.reflect.Modifier.{ STATIC, PUBLIC, ABSTRACT }
+import java.lang.reflect.Modifier.{ABSTRACT, PUBLIC, STATIC}
 import java.net.URL
+
 import xsbti.DependencyContext
 import xsbti.DependencyContext._
+
+import scala.annotation.tailrec
+import scala.collection.mutable
+import scala.collection.mutable.{ArrayBuffer, Buffer}
 
 private[sbt] object Analyze {
   def apply[T](newClasses: Seq[File], sources: Seq[File], log: Logger)(analysis: xsbti.AnalysisCallback, loader: ClassLoader, readAPI: (File, Seq[Class[_]]) => Set[String]) {
@@ -34,6 +35,7 @@ private[sbt] object Analyze {
       sourceFile <- classFile.sourceFile orElse guessSourceName(newClass.getName);
       source <- guessSourcePath(sourceMap, classFile, log)
     ) {
+      analysis.beginSource(source)
       analysis.generatedClass(source, newClass, classFile.className)
       productToSource(newClass) = source
       sourceToClassFiles.getOrElseUpdate(source, new ArrayBuffer[ClassFile]) += classFile
@@ -63,10 +65,13 @@ private[sbt] object Analyze {
       val notInherited = classFiles.flatMap(_.types).toSet -- publicInherited
       processDependencies(notInherited, DependencyByMemberRef)
       processDependencies(publicInherited, DependencyByInheritance)
+      analysis.endSource(source)
     }
 
     for (source <- sources filterNot sourceToClassFiles.keySet) {
+      analysis.beginSource(source)
       analysis.api(source, new xsbti.api.SourceAPI(Array(), Array()))
+      analysis.endSource(source)
     }
   }
   private[this] def urlAsFile(url: URL, log: Logger): Option[File] =
