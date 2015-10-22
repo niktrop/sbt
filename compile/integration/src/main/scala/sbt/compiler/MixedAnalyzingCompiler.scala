@@ -1,20 +1,16 @@
 package sbt.compiler
 
 import java.io.File
-import java.lang.ref.{ SoftReference, Reference }
+import java.lang.ref.{Reference, SoftReference}
 
-import sbt.classfile.Analyze
-import sbt.classpath.ClasspathUtilities
-import sbt.compiler.CompileConfiguration
+import sbt._
 import sbt.compiler.javac.AnalyzingJavaCompiler
 import sbt.inc.Locate.DefinesClass
-import sbt._
-import sbt.inc._
-import sbt.inc.Locate
-import xsbti.{ AnalysisCallback, Reporter }
+import sbt.inc.{Locate, _}
 import xsbti.api.Source
 import xsbti.compile.CompileOrder._
 import xsbti.compile._
+import xsbti.{AnalysisCallback, Reporter}
 
 /** An instance of an analyzing compiler that can run both javac + scalac. */
 final class MixedAnalyzingCompiler(
@@ -26,8 +22,10 @@ final class MixedAnalyzingCompiler(
   import currentSetup._
 
   private[this] val absClasspath = classpath.map(_.getAbsoluteFile)
+
+  private[this] val compilerOpt = Option(compiler)
   /** Mechanism to work with compiler arguments. */
-  private[this] val cArgs = new CompilerArguments(compiler.scalaInstance, compiler.cp)
+  private[this] val cArgsOpt = compilerOpt.map(compiler => new CompilerArguments(compiler.scalaInstance, compiler.cp))
 
   /**
    * Compiles the given Java/Scala files.
@@ -42,20 +40,23 @@ final class MixedAnalyzingCompiler(
     val incSrc = sources.filter(include)
     val (javaSrcs, scalaSrcs) = incSrc partition javaOnly
     logInputs(log, javaSrcs.size, scalaSrcs.size, outputDirs)
+
     /** compiles the scala code necessary using the analyzing compiler. */
     def compileScala(): Unit =
-      if (!scalaSrcs.isEmpty) {
-        val sources = if (order == Mixed) incSrc else scalaSrcs
-        val arguments = cArgs(Nil, absClasspath, None, options.options)
-        timed("Scala compilation", log) {
-          compiler.compile(sources, changes, arguments, output, callback, reporter, config.cache, log, progress)
+      if (scalaSrcs.nonEmpty) {
+        for (comp <- compilerOpt; cArgs <- cArgsOpt) {
+          val sources = if (order == Mixed) incSrc else scalaSrcs
+          val arguments = cArgs(Nil, absClasspath, None, options.options)
+          timed("Scala compilation", log) {
+            compiler.compile(sources, changes, arguments, output, callback, reporter, cache, log, progress)
+          }
         }
       }
     /**
      * Compiles the Java code necessary.  All analysis code is included in this method.
      */
     def compileJava(): Unit =
-      if (!javaSrcs.isEmpty) {
+      if (javaSrcs.nonEmpty) {
         // Runs the analysis portion of Javac.
         timed("Java compile + analysis", log) {
           javac.compile(javaSrcs, options.javacOptions.toArray[String], output, callback, reporter, log, progress)
@@ -118,8 +119,9 @@ object MixedAnalyzingCompiler {
     skip: Boolean = false,
     incrementalCompilerOptions: IncOptions): CompileConfiguration =
     {
+      val scalaVersion = Option(scalac).map(_.scalaInstance.actualVersion()).getOrElse("none")
       val compileSetup = new CompileSetup(output, new CompileOptions(options, javacOptions),
-        scalac.scalaInstance.actualVersion, compileOrder, incrementalCompilerOptions.nameHashing)
+        scalaVersion, compileOrder, incrementalCompilerOptions.nameHashing)
       config(
         sources,
         classpath,
@@ -152,7 +154,6 @@ object MixedAnalyzingCompiler {
     skip: Boolean,
     cache: GlobalsCache,
     incrementalCompilerOptions: IncOptions): CompileConfiguration = {
-    import CompileSetup._
     new CompileConfiguration(sources, classpath, previousAnalysis, previousSetup, setup,
       progress, analysis, definesClass, reporter, compiler, javac, cache, incrementalCompilerOptions)
   }

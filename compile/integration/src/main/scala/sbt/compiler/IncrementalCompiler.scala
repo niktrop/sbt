@@ -140,6 +140,13 @@ object IC extends IncrementalCompiler[Analysis, AnalyzingCompiler] {
     import mixedCompiler.config._
     import mixedCompiler.config.currentSetup.output
     val sourcesSet = sources.toSet
+    val deletionListener = {
+      val extendedProgress = progress match {
+        case ext: ExtendedCompileProgress => Some(ext)
+        case _                            => None
+      }
+      (file: File) => extendedProgress.foreach(_.deleted(file))
+    }
     val analysis = previousSetup match {
       case Some(previous) if previous.nameHashing != currentSetup.nameHashing =>
         // if the value of `nameHashing` flag has changed we have to throw away
@@ -148,9 +155,9 @@ object IC extends IncrementalCompiler[Analysis, AnalyzingCompiler] {
         // Otherwise we'll be getting UnsupportedOperationExceptions
         Analysis.empty(currentSetup.nameHashing)
       case Some(previous) if equiv.equiv(previous, currentSetup) => previousAnalysis
-      case _ => Incremental.prune(sourcesSet, previousAnalysis, None)
+      case _ => Incremental.prune(sourcesSet, previousAnalysis, Some(deletionListener))
     }
     // Run the incremental compiler using the mixed compiler we've defined.
-    IncrementalCompile(sourcesSet, entry, mixedCompiler.compile, analysis, getAnalysis, output, log, incOptions, None).swap
+    IncrementalCompile(sourcesSet, entry, mixedCompiler.compile, analysis, getAnalysis, output, log, incOptions, Some(deletionListener)).swap
   }
 }
