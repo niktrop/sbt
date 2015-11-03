@@ -4,14 +4,13 @@
 package sbt
 package inc
 
-import xsbti.api.{ Source, SourceAPI, Compilation, OutputSetting, _internalOnly_NameHashes }
-import xsbti.compile.{ DependencyChanges, Output, SingleOutput, MultipleOutput }
-import xsbti.{ Position, Problem, Severity }
-import Logger.{ m2o, problem }
 import java.io.File
-import xsbti.api.Definition
-import xsbti.DependencyContext
-import xsbti.DependencyContext.{ DependencyByInheritance, DependencyByMemberRef }
+
+import sbt.Logger.m2o
+import xsbti.DependencyContext.{DependencyByInheritance, DependencyByMemberRef}
+import xsbti.api.{Compilation, OutputSetting, Source, SourceAPI, _internalOnly_NameHashes}
+import xsbti.compile.{DependencyChanges, MultipleOutput, Output, SingleOutput}
+import xsbti.{DependencyContext, Position, Problem, Severity}
 
 /**
  * Helper methods for running incremental compilation.  All this is responsible for is
@@ -91,7 +90,7 @@ private final class AnalysisCallback(internalMap: File => Option[File], external
 
   override def toString = (List("APIs", "Binary deps", "Products", "Source deps") zip List(apis, binaryDeps, classes, intSrcDeps)).map { case (label, map) => label + "\n\t" + map.mkString("\n\t") }.mkString("\n")
 
-  import collection.mutable.{ HashMap, HashSet, ListBuffer, Map, Set }
+  import collection.mutable.{HashMap, HashSet, ListBuffer, Map, Set}
 
   private[this] val apis = new HashMap[File, (Int, SourceAPI)]
   private[this] val usedNames = new HashMap[File, Set[String]]
@@ -185,7 +184,7 @@ private final class AnalysisCallback(internalMap: File => Option[File], external
   private val emptyNameHashes = new xsbti.api._internalOnly_NameHashes(Array.empty, Array.empty)
 
   def api(sourceFile: File, source: SourceAPI) {
-    import xsbt.api.{ APIUtil, HashAPI }
+    import xsbt.api.{APIUtil, HashAPI}
     if (APIUtil.isScalaSourceName(sourceFile.getName) && APIUtil.hasMacro(source)) macroSources += sourceFile
     publicNameHashes(sourceFile) = {
       if (nameHashing)
@@ -231,4 +230,7 @@ private final class AnalysisCallback(internalMap: File => Option[File], external
         a.addSource(src, s, stamp, info, products, internalDeps, externalDeps, binDeps)
 
     }
+
+  def beginSource(source: File) {}
+  def endSource(sourcePath: File): Unit = {}
 }

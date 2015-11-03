@@ -59,4 +59,10 @@ public interface AnalysisCallback
 	 *       Do not depend on it, please.
 	 */
 	public boolean nameHashing();
+
+	/** Called before the source at the given location is processed. */
+	public void beginSource(File source);
+	/** Called after the source at the given location has been processed. */
+	public void endSource(File sourcePath);
+
 }

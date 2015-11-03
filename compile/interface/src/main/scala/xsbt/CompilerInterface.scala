@@ -3,20 +3,16 @@
  */
 package xsbt
 
-import xsbti.{ AnalysisCallback, Logger, Problem, Reporter, Severity }
-import xsbti.compile._
-import scala.tools.nsc.{ backend, io, reporters, symtab, util, Phase, Global, Settings, SubComponent }
-import scala.tools.nsc.interactive.RangePositions
-import backend.JavaPlatform
-import scala.tools.util.PathResolver
-import symtab.SymbolLoaders
-import util.{ ClassPath, DirectoryClassPath, MergedClassPath, JavaClassPath }
-import ClassPath.{ ClassPathContext, JavaContext }
-import io.AbstractFile
-import scala.annotation.tailrec
-import scala.collection.mutable
-import Log.debug
 import java.io.File
+
+import xsbt.Log.debug
+import xsbti.compile._
+import xsbti.{AnalysisCallback, Logger, Problem, Reporter, Severity}
+
+import scala.collection.mutable
+import scala.tools.nsc.interactive.RangePositions
+import scala.tools.nsc.io.AbstractFile
+import scala.tools.nsc.{Global, Phase, Settings, SubComponent, reporters}
 
 final class CompilerInterface {
   def newCompiler(options: Array[String], output: Output, initialLog: Logger, initialDelegate: Reporter, resident: Boolean): CachedCompiler =
@@ -74,7 +70,10 @@ private final class CachedCompiler0(args: Array[String], output: Output, initial
       settings.outputDirs.setSingleOutput(single.outputDirectory.getAbsolutePath)
   }
 
-  val command = Command(args.toList, settings)
+  private val argList = args.toList
+  private val simpleAnalysis = argList.head == "IntellijIdea.simpleAnalysis"
+  val command = Command(if (simpleAnalysis) argList.tail else argList, settings)
+
   private[this] val dreporter = DelegatingReporter(settings, initialLog.reporter)
   try {
     if (!noErrors(dreporter)) {
@@ -205,8 +204,10 @@ private final class CachedCompiler0(args: Array[String], output: Output, initial
     override lazy val phaseDescriptors =
       {
         phasesSet += sbtAnalyzer
-        phasesSet += sbtDependency
-        phasesSet += apiExtractor
+        if (!simpleAnalysis) {
+          phasesSet += sbtDependency
+          phasesSet += apiExtractor
+        }
         superComputePhaseDescriptors
       }
     // Required because computePhaseDescriptors is private in 2.8 (changed to protected sometime later).
